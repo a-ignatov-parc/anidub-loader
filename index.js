@@ -1,4 +1,5 @@
 import fs from 'fs';
+import vm from 'vm';
 import path from 'path';
 
 import mkdirp from 'mkdirp';
@@ -18,7 +19,7 @@ let {'plex-path': plexPath = './', page, season = 1} = process.argv.slice(2).red
 	return result;
 }, {});
 
-const formatRegex = /^url(\d{3,4})$/;
+const formatRegex = /^mp4_(\d{3,4})$/;
 
 load(page, 'TV Series home page')
 	.then((body) => {
@@ -40,32 +41,65 @@ load(page, 'TV Series home page')
 	})
 	.then(({title, links}) => {
 		let requests = links
-			.map(({rawParams, episode}) => {
+			.map(({rawParams, episode, params}) => {
+				let {oid, id} = params;
 				return load(
-					`http://vk.com/video_ext.php?${rawParams}`,
-					`hosting page for Episode ${formatNum(episode)}`
+					`http://lidplay.net/video_ext.php?oid=${oid}&id=${id}`,
+					`hosting page for "Episode ${formatNum(episode)}"`
 				);
 			});
 
 		return Promise
 			.all(requests)
 			.then((results) => {
-				return results.map((body) => {
-					let $ = cheerio.load(body);
-					return $('param[name="flashvars"]').attr('value');
-				});
+				return results
+					.map((body) => {
+						let $ = cheerio.load(body);
+						return $('script').first().text();
+					})
+					.map((scriptContent) => {
+						let sandbox = {};
+						let context = new vm.createContext(sandbox);
+						let script = new vm.Script(scriptContent);
+
+						script.runInContext(context);
+						return sandbox.vk;
+					});
 			})
-			.then((params) => {
-				return params
-					.map(parseParams)
+			.then((payload) => {
+				return Promise.all(payload.map(({url, callback}, i) => {
+					let {episode} = links[i];
+					return load(
+						`${url}&callback=${callback}`,
+						`vk.com api for "Episode ${formatNum(episode)}" video info`
+					)
+					.then((response) => {
+						return response
+							.replace(`${callback}(`, '')
+							.replace(/\);$/, '');
+					})
+					.then((stringPayload) => {
+						let result;
+
+						try {
+							result = JSON.parse(stringPayload);
+						} catch(e) {}
+
+						return result && result.response[1].files;
+					});
+				}));
+			})
+			.then((videosParams) => {
+				return videosParams
 					.map((params) => {
+						if (!params) return {};
 						return Object
 							.keys(params)
 							.filter((key) => formatRegex.test(key))
 							.reduce((result, key) => {
 								result[key.replace(formatRegex, '$1')] = params[key];
 								return result;
-							}, {})
+							}, {});
 					});
 			})
 			.then((config) => {
@@ -75,9 +109,9 @@ load(page, 'TV Series home page')
 						let {rawParams, params, episode} = links[i];
 
 						if (quality) {
-							console.log(`Selected video quality for Episode ${formatNum(episode)}: ${quality}`);
+							console.log(`Selected video quality for "Episode ${formatNum(episode)}": ${quality}`);
 						} else {
-							console.log(`Unable to detect video quality for Episode ${formatNum(episode)}`);
+							console.log(`Unable to detect video quality for "Episode ${formatNum(episode)}"`);
 						}
 
 						return {
@@ -157,6 +191,8 @@ function downloadFile(url, name, targetPath) {
 		return Promise.resolve();
 	}
 
+	console.log(`Preparing to download "${name}" from "${url}"...`);
+
 	return mkdir(absoluteTargetPath).then(() => {
 		return new Promise((resolve, reject) => {
 			request(url)
@@ -170,7 +206,7 @@ function downloadFile(url, name, targetPath) {
 					next();
 				}))
 				.pipe(fs.createWriteStream(pathname))
-				.on('end', resolve)
+				.on('close', resolve)
 				.on('error', reject)
 		});
 	});
