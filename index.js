@@ -64,14 +64,14 @@ load(page, 'TV Series home page')
 						let script = new vm.Script(scriptContent);
 
 						script.runInContext(context);
-						return sandbox.vk;
+						return sandbox.params;
 					});
 			})
 			.then((payload) => {
-				return Promise.all(payload.map(({url, callback}, i) => {
+				return Promise.all(payload.map(({videos, access_token, sig, callback}, i) => {
 					let {episode} = links[i];
 					return load(
-						`${url}&callback=${callback}`,
+						`https://api.vk.com/method/video.get?videos=${videos}&access_token=${access_token}&sig=${sig}&callback=${callback}`,
 						`vk.com api for "Episode ${formatNum(episode)}" video info`
 					)
 					.then((response) => {
@@ -200,7 +200,7 @@ function downloadFile(url, name, targetPath) {
 		let stats;
 
 		download.setOptions({
-			threadsCount: 5
+			threadsCount: 4
 		});
 
 		return new Promise((resolve, reject) => {
