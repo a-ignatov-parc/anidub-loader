@@ -13,6 +13,7 @@ import ProgressBar from 'progress';
 import Downloader from 'mt-files-downloader';
 
 const mkdir = Promise.promisify(mkdirp);
+const fsStat = Promise.promisify(fs.stat);
 
 let {'plex-path': plexPath = './', page, season = 1} = process.argv.slice(2).reduce((result, param) => {
 	let [key, value] = param.split('=');
@@ -190,43 +191,49 @@ function downloadFile(url, name, targetPath) {
 		return Promise.resolve();
 	}
 
-	console.log(`Preparing to download "${name}" from "${url}"...`);
 
 	return mkdir(absoluteTargetPath).then(() => {
 		let downloader = new Downloader();
-		let download = downloader.download(url, pathname);
-		let progress;
-		let checker;
-		let stats;
 
-		download.setOptions({
-			threadsCount: 4
-		});
+		return fsStat(`${pathname}.mtd`)
+			.then(() => {
+				console.log(`Preparing to resume download of "${name}"...`);
+				return downloader.resumeDownload(pathname);
+			}, () => {
+				console.log(`Preparing to download "${name}" from "${url}"...`);
+				return downloader.download(url, pathname);
+			})
+			.then((download) => download.setOptions({
+				threadsCount: 4
+			}))
+			.then((download) => new Promise((resolve, reject) => {
+				let progress;
+				let checker;
+				let stats;
 
-		return new Promise((resolve, reject) => {
-			download
-				.on('start', () => {
-					let initialStats = download.getStats();
+				download
+					.on('start', () => {
+						let initialStats = download.getStats();
 
-					progress = createProgressBar(`Downloading "${name.split('.')[0]}"`, initialStats.total.size);
-					checker = setInterval(() => {
+						progress = createProgressBar(`Downloading "${name.split('.')[0]}"`, initialStats.total.size);
+						checker = setInterval(() => {
+							stats = download.getStats();
+							progress.update(stats.total.completed / 100);
+						}, 100);
+					})
+					.on('end', () => {
 						stats = download.getStats();
+						checker && clearInterval(checker);
 						progress.update(stats.total.completed / 100);
-					}, 100);
-				})
-				.on('end', () => {
-					stats = download.getStats();
-					checker && clearInterval(checker);
-					progress.update(stats.total.completed / 100);
-					resolve(stats);
-				})
-				.on('error', (err) => {
-					checker && clearInterval(checker);
-					progress.terminate();
-					reject(err);
-				})
-				.start();
-		});
+						resolve(stats);
+					})
+					.on('error', (err) => {
+						checker && clearInterval(checker);
+						progress.terminate();
+						reject(err);
+					})
+					.start();
+			}));
 	});
 }
 
