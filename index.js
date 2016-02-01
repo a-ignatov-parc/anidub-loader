@@ -214,18 +214,17 @@ function downloadFile(url, name, targetPath) {
 				download
 					.on('start', () => {
 						let initialStats = download.getStats();
-
 						progress = createProgressBar(`Downloading "${name.split('.')[0]}"`, initialStats.total.size);
 						checker = setInterval(() => {
 							stats = download.getStats();
-							progress.update(stats.total.completed / 100);
+							progress.update((stats.total.completed / 100) - .01);
 						}, 100);
 					})
 					.on('end', () => {
-						stats = download.getStats();
 						checker && clearInterval(checker);
-						progress.update(stats.total.completed / 100);
-						resolve(stats);
+						progress.update(1);
+						progress.terminate();
+						resolve(download.getStats());
 					})
 					.on('error', (err) => {
 						checker && clearInterval(checker);
