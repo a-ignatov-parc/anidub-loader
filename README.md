@@ -16,10 +16,23 @@ npm start page=http://online.anidub.com/anime_tv/full/2914-kovboy-bibop-cowboy-b
 
   > Default: `./`
 
-- `season` — Season number. 
+- `title` — TV Series title.
+
+- `season` — Season number.
 
   > Default: 1
+
+- `episodes` — Range of episodes to download. 
+
+  Examples:
+  
+  ```
+  episodes=1
+  episodes=1,24
+  episodes=1-24
+  episodes=1-24,32
+  ```
   
 ## Limitations
 
-1. Currently supports processing only for vk.com video hosting.
+- Currently supports processing only for vk.com video hosting.
