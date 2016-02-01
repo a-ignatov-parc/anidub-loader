@@ -36,3 +36,7 @@ npm start page=http://online.anidub.com/anime_tv/full/2914-kovboy-bibop-cowboy-b
 ## Limitations
 
 - Currently supports processing only for vk.com video hosting.
+
+## Additional
+
+- [Naming and Organizing TV Shows](https://support.plex.tv/hc/en-us/articles/200220687-Naming-Series-Season-Based-TV-Shows)
