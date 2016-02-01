@@ -10,6 +10,7 @@ import through from 'through2';
 import expandHomeDir from 'expand-home-dir';
 
 import ProgressBar from 'progress';
+import Downloader from 'mt-files-downloader';
 
 const mkdir = Promise.promisify(mkdirp);
 
@@ -183,8 +184,6 @@ function createProgressBar(description = 'Loading', total = 1) {
 function downloadFile(url, name, targetPath) {
 	let absoluteTargetPath = path.resolve(expandHomeDir(targetPath));
 	let pathname = path.join(absoluteTargetPath, name);
-	let progress;
-	let total;
 
 	if (!url) {
 		console.log(`Unable to resolve video url for "${name}". Skipping...`);
@@ -194,20 +193,39 @@ function downloadFile(url, name, targetPath) {
 	console.log(`Preparing to download "${name}" from "${url}"...`);
 
 	return mkdir(absoluteTargetPath).then(() => {
+		let downloader = new Downloader();
+		let download = downloader.download(url, pathname);
+		let progress;
+		let checker;
+		let stats;
+
+		download.setOptions({
+			threadsCount: 5
+		});
+
 		return new Promise((resolve, reject) => {
-			request(url)
-				.on('response', (response) => {
-					total = +response.headers['content-length'];
-					progress = createProgressBar(`Downloading "${name.split('.')[0]}"`, total);
+			download
+				.on('start', () => {
+					let initialStats = download.getStats();
+
+					progress = createProgressBar(`Downloading "${name.split('.')[0]}"`, initialStats.total.size);
+					checker = setInterval(() => {
+						stats = download.getStats();
+						progress.update(stats.total.completed / 100);
+					}, 100);
 				})
-				.pipe(through(function(chunk, enc, next) {
-					progress.tick(chunk.length);
-					this.push(chunk);
-					next();
-				}))
-				.pipe(fs.createWriteStream(pathname))
-				.on('close', resolve)
-				.on('error', reject)
+				.on('end', () => {
+					stats = download.getStats();
+					checker && clearInterval(checker);
+					progress.update(stats.total.completed / 100);
+					resolve(stats);
+				})
+				.on('error', (err) => {
+					checker && clearInterval(checker);
+					progress.terminate();
+					reject(err);
+				})
+				.start();
 		});
 	});
 }
