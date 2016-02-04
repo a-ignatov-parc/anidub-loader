@@ -8,6 +8,7 @@ import cheerio from 'cheerio';
 import request from 'request';
 import Promise from 'bluebird';
 import through from 'through2';
+import sanitize from 'sanitize-filename';
 import expandHomeDir from 'expand-home-dir';
 
 import ProgressBar from 'progress';
@@ -56,12 +57,13 @@ load(ctx.page, 'TV Series home page')
 	.then((body) => {
 		let $ = cheerio.load(body);
 		return {
-			title: $('.titlfull').text(),
+			pageTitle: $('.titlfull').text(),
 			links: $('#video_vk option').map((i, el) => $(el).attr('value')).get(),
 		};
 	})
-	.then(({title, links}) => {
-		ctx.title || (ctx.title = parseTitle(title));
+	.then(({pageTitle, links}) => {
+		let {season, title} = parsePageInfo(pageTitle);
+		merge(ctx, {season, title});
 		return links.map((link) => {
 			let [rawParams, episode] = link.split('?')[1].split('|');
 			let params = parseParams(rawParams);
@@ -104,15 +106,11 @@ load(ctx.page, 'TV Series home page')
 			},
 		} = payload;
 
-		return load(
-			`https://api.vk.com/method/video.get?videos=${videos}&access_token=${access_token}&sig=${sig}&callback=${callback}`,
+		return post(
+			`https://api.vk.com/method/video.get`,
+			{videos, access_token, sig},
 			`vk.com api for "Episode ${formatNum(episode)}" video info`
 		)
-		.then((response) => {
-			return response
-				.replace(`${callback}(`, '')
-				.replace(/\);$/, '');
-		})
 		.then((stringPayload) => {
 			let result;
 
@@ -156,7 +154,7 @@ load(ctx.page, 'TV Series home page')
 			'plex-path': plexPath
 		} = ctx;
 
-		let targetPath = path.join(plexPath, title, `Season ${formatNum(season)}`);
+		let targetPath = path.join(plexPath, sanitize(title), `Season ${formatNum(season)}`);
 		let params = episodes.map(({video, episode}) => {
 			return [video, `${title} - s${formatNum(season)}e${formatNum(episode)}.mp4`, targetPath];
 		});
@@ -170,10 +168,36 @@ load(ctx.page, 'TV Series home page')
 
 function load(url, description) {
 	return new Promise((resolve, reject) => {
-		let progress = createProgressBar(`Requesting ${description || `"${url}"`}`);
+		let progress = new ProgressBar(`Requesting ${description || `"${url}"`}... :bar`, {
+			incomplete: '',
+			complete: '✔︎',
+			total: 1,
+		});
 
 		request(url, (err, response, body) => {
-			if (err) return reject(err);
+			if (err) {
+				progress.terminate();
+				return reject(err);
+			}
+			progress.tick();
+			resolve(body);
+		});
+	});
+}
+
+function post(url, form, description) {
+	return new Promise((resolve, reject) => {
+		let progress = new ProgressBar(`Making POST request to ${description || `"${url}"`}... :bar`, {
+			incomplete: '',
+			complete: '✔︎',
+			total: 1,
+		});
+
+		request.post({url, form}, (err, response, body) => {
+			if (err) {
+				progress.terminate();
+				return reject(err);
+			}
 			progress.tick();
 			resolve(body);
 		});
@@ -190,11 +214,15 @@ function parseParams(queryString = '') {
 		}, {});
 }
 
-function parseTitle(rawString) {
-	return rawString
-		.trim()
-		.replace(/^([^\/]+)\/([^\[]+)\[([^\]]+)\]$/, '$2')
-		.trim();
+const pageInfoRegex = /(?:тв-(\d+))?\s*\/\s*(?:(.*)(?:tv-\d+)|(.*)\s*\[)/i;
+
+function parsePageInfo(rawString = '') {
+	let [, season, title1, title2] = rawString.match(pageInfoRegex);
+
+	return {
+		season: +(season || ctx.season),
+		title: (ctx.title || title2 || title1 || '').trim(),
+	};
 }
 
 function chooseBestQuality(params) {
@@ -204,10 +232,11 @@ function chooseBestQuality(params) {
 }
 
 function createProgressBar(description = 'Loading', total = 1) {
-	return new ProgressBar(`${description} [:bar] :percent :etas | :elapsed`, {
+	console.log(description);
+	return new ProgressBar(`[:bar] :percent`, {
 		incomplete: ' ',
 		complete: '=',
-		width: 20,
+		width: 80,
 		total
 	});
 }
@@ -233,7 +262,7 @@ function downloadFile(url, name, targetPath) {
 				return downloader.download(url, pathname);
 			})
 			.then((download) => download.setOptions({
-				threadsCount: 4
+				threadsCount: 16
 			}))
 			.then((download) => new Promise((resolve, reject) => {
 				let progress;
@@ -256,9 +285,11 @@ function downloadFile(url, name, targetPath) {
 						resolve(download.getStats());
 					})
 					.on('error', (err) => {
+						console.log(err);
 						checker && clearInterval(checker);
 						progress.terminate();
-						reject(err);
+						resolve(download.getStats());
+						download.destroy();
 					})
 					.start();
 			}));
