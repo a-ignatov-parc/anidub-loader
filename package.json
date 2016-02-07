@@ -17,7 +17,7 @@
     "loader",
     "anidub"
   ],
-  "author": "",
+  "author": "Anton Ignatov <abietis@gmail.com>",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/a-ignatov-parc/anidub-loader/issues"
